@@ -7,6 +7,7 @@
 </Query>
 
 static int MillisecondsToSeconds = 1000;
+static int SecondsToMinutes = 60 * MillisecondsToSeconds;
 static int DefaultInterval = 4 * MillisecondsToSeconds;
 
 public class BrowserFactory
@@ -71,22 +72,30 @@ public class LoginProcessor
 }
 
 public class CommentSender
-{
-	private readonly int _sendInterval = 4 * 60 * MillisecondsToSeconds; // Each 3 minutes
+{	
 	const string JsAddTextToInput = @"
 		var elm = arguments[0], txt = arguments[1];
 		elm.value += txt;
 		elm.dispatchEvent(new Event('input', { bubbles: true }));";
+	const int MinIntervalInMinutes = 1;
+	const int MaxIntervalInMinutes = 3;
+	
 	string _userMode;
 	RemoteWebDriver _remoteWebDriver;
-	List<string> _messages;
-	IWebElement _messageTextArea;
+	List<string> _comments;
+	IWebElement _commentTextArea;
+	readonly Random _selectCommentRandom;
+	readonly Random _sendIntervalRandom;
 
 	public CommentSender(RemoteWebDriver remoteWebDriver, string userMode)
 	{
 		_remoteWebDriver = remoteWebDriver;
 		_userMode = userMode;
-		LoadMessages();
+		
+		_selectCommentRandom = new Random();
+		_sendIntervalRandom = new Random();
+		
+		LoadComments();
 	}
 
 	public void Send()
@@ -94,23 +103,29 @@ public class CommentSender
 		SetCommentInput();
 		
 		while (true)
-			_messages.ForEach(SendMessage);
+			SendComment(GetCommentRandomly());
 	}
 	
 	private void SetCommentInput() =>
-		_messageTextArea = _remoteWebDriver.FindElementByXPath("//textarea[@placeholder='Add a comment…']");
+		_commentTextArea = _remoteWebDriver.FindElementByXPath("//textarea[@placeholder='Add a comment…']");
 		
-	private void SendMessage(string message)
+	private string GetCommentRandomly() =>
+		_comments[_selectCommentRandom.Next(0, _comments.Count)];
+		
+	private void SendComment(string message)
 	{
-		PlaceComment(_messageTextArea, message);
+		PlaceComment(_commentTextArea, message);
 		SubmitAndWait();
 	}
 	
 	private void SubmitAndWait()
 	{
-		_messageTextArea.SendKeys(Keys.Enter);
-		Thread.Sleep(_sendInterval);
+		_commentTextArea.SendKeys(Keys.Enter);
+		Thread.Sleep(ComputeSubmitInterval());
 	}
+	
+	private int ComputeSubmitInterval() =>
+		_sendIntervalRandom.Next(MinIntervalInMinutes, MaxIntervalInMinutes) * SecondsToMinutes;
 	
 	private void PlaceComment(IWebElement commentInput, string message)
 	{
@@ -119,14 +134,14 @@ public class CommentSender
 		commentInput.SendKeys(" ");
 	}
 
-	private void LoadMessages()
+	private void LoadComments()
 	{
-		if (_messages == null)
-			_messages = new List<string>();
+		if (_comments == null)
+			_comments = new List<string>();
 		
 		using (var fileReader = new StreamReader(Path.Combine(Util.MyQueriesFolder, $"{_userMode}-comments.txt")))
 			while (!fileReader.EndOfStream)
-				_messages.Add(fileReader.ReadLine());
+				_comments.Add(fileReader.ReadLine());
 	}
 }
 
@@ -138,6 +153,7 @@ void Main(string[] args)
 	// liveUserName: "diegosousa88.follower" for development
 	//               "diegosousa88" for production
 	//args = new string[] { "hater", "diegosousa88", "[PASSWORD]" };
+
 	string userMode = args[0];
 	string liveUserName = args[1];
 	string password = args[2];
@@ -157,6 +173,7 @@ void Main(string[] args)
 
 	// Navigate to Instagram live page.
 	webDriver.Navigate().GoToUrl($"https://www.instagram.com/{liveUserName}/live");
+	//webDriver.Navigate().GoToUrl($"https://www.instagram.com/{liveUserName}.follower/live");
 	
 	// Send comments.
 	var commentSender = new CommentSender(webDriver, userMode);
